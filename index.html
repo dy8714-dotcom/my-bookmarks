@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📚 マイブックマークポータル</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- ログイン画面 -->
+    <div id="loginScreen" class="login-container">
+        <div class="login-card">
+            <h1>📚 マイブックマークポータル</h1>
+            
+            <!-- ログインフォーム -->
+            <div id="loginForm">
+                <h2>ログイン</h2>
+                <input type="text" id="loginUsername" class="input-field" placeholder="ユーザー名">
+                <input type="password" id="loginPassword" class="input-field" placeholder="パスワード">
+                <button id="loginBtn" class="btn btn-primary btn-block">ログイン</button>
+                <p class="link-text">または</p>
+                <button id="showRegisterBtn" class="btn btn-secondary btn-block">新規登録</button>
+            </div>
+
+            <!-- 新規登録フォーム -->
+            <div id="registerForm" style="display: none;">
+                <h2>新規登録</h2>
+                <input type="text" id="registerUsername" class="input-field" placeholder="ユーザー名（3文字以上）">
+                <input type="password" id="registerPassword" class="input-field" placeholder="パスワード（4文字以上）">
+                <input type="password" id="registerConfirmPassword" class="input-field" placeholder="パスワード（再入力）">
+                <button id="registerBtn" class="btn btn-primary btn-block">登録</button>
+                <p class="link-text">または</p>
+                <button id="showLoginBtn" class="btn btn-secondary btn-block">ログイン画面へ戻る</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- メインアプリ画面 -->
+    <div id="appScreen" style="display: none;">
+        <!-- ヘッダー -->
+        <header class="app-header">
+            <h1>📚 マイブックマークポータル</h1>
+            <div class="header-actions">
+                <span id="currentUser" class="current-user"></span>
+                <button id="logoutBtn" class="btn btn-danger">ログアウト</button>
+            </div>
+        </header>
+
+        <!-- コントロールバー -->
+        <div class="control-bar">
+            <button id="addCategoryBtn" class="btn btn-primary">➕ カテゴリー追加</button>
+            <button id="exportBtn" class="btn btn-success">📥 エクスポート</button>
+            <button id="importBtn" class="btn btn-info">📤 インポート</button>
+        </div>
+
+        <!-- メインコンテンツ -->
+        <main id="mainContent" class="main-content">
+            <!-- カテゴリーがここに表示されます -->
+        </main>
+    </div>
+
+    <!-- カテゴリーモーダル -->
+    <div id="categoryModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="categoryModalTitle">カテゴリーを追加</h2>
+            <input type="text" id="categoryNameInput" class="input-field" placeholder="カテゴリー名">
+            <input type="color" id="categoryColorInput" class="color-picker" value="#4CAF50">
+            <div class="modal-actions">
+                <button id="saveCategoryBtn" class="btn btn-primary">保存</button>
+                <button id="cancelCategoryBtn" class="btn cancel">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ブックマークモーダル -->
+    <div id="bookmarkModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="bookmarkModalTitle">ブックマークを追加</h2>
+            <input type="text" id="bookmarkNameInput" class="input-field" placeholder="サイト名">
+            <input type="url" id="bookmarkUrlInput" class="input-field" placeholder="URL">
+            <textarea id="bookmarkDescInput" class="input-field" placeholder="説明（任意）"></textarea>
+            <div class="modal-actions">
+                <button id="saveBookmarkBtn" class="btn btn-primary">保存</button>
+                <button id="cancelBookmarkBtn" class="btn cancel">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- インポートモーダル -->
+    <div id="importModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>データをインポート</h2>
+            <input type="file" id="importFileInput" accept=".json">
+            <div class="modal-actions">
+                <button id="confirmImportBtn" class="btn btn-primary">インポート</button>
+                <button id="cancelImportBtn" class="btn cancel">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
