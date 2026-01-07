@@ -425,15 +425,10 @@ class UIManager {
             return;
         }
 
-        const grid = document.createElement('div');
-        grid.className = 'category-grid';
-
         this.manager.data.categories.forEach(category => {
             const card = this.createCategoryCard(category);
-            grid.appendChild(card);
+            this.mainContent.appendChild(card);
         });
-
-        this.mainContent.appendChild(grid);
     }
 
     createCategoryCard(category) {
