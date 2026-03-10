@@ -1,15 +1,16 @@
 /**
- * マイブックマーク - IndexedDB 対応版 (安定性向上・エラー修正版)
+ * マイブックマーク - IndexedDB 対応版 (超安定・最終修正版)
  * * 【修正内容】
- * 1. エラー "Cannot read properties of null (reading 'style')" を回避する安全装置を追加。
- * 2. 保存先を IndexedDB へ変更（5MB制限の撤廃）。
- * 3. 起動時の自動データ移行機能を維持。
+ * 1. 白い画面（起動不能）を回避するため、エラーが起きても強制的に画面を表示する仕組みを導入。
+ * 2. データ移行時の JSON 解析エラーを無視するようにし、壊れたデータがあっても起動を妨げないように改善。
+ * 3. 画面部品（ID）が見つからなくても、他の機能が動き続けるようにガードを強化。
  */
 
 // --- データベース管理クラス (IndexedDB) ---
 class DBManager {
     constructor() {
-        this.dbName = 'MyBookmarkAppDB_V3_Stable';
+        // データベース名を以前のものと変えて、クリーンな状態で開始します
+        this.dbName = 'MyBookmarkAppDB_Final_Stable';
         this.version = 1;
         this.storeName = 'bookmarks_store';
         this.db = null;
@@ -18,63 +19,82 @@ class DBManager {
     async open() {
         if (this.db) return this.db;
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.version);
-            request.onupgradeneeded = (e) => {
-                const db = e.target.result;
-                if (!db.objectStoreNames.contains(this.storeName)) {
-                    db.createObjectStore(this.storeName);
-                }
-            };
-            request.onsuccess = (e) => {
-                this.db = e.target.result;
-                resolve(this.db);
-            };
-            request.onerror = () => reject('IndexedDB の起動に失敗しました。');
+            try {
+                const request = indexedDB.open(this.dbName, this.version);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(this.storeName)) {
+                        db.createObjectStore(this.storeName);
+                    }
+                };
+                request.onsuccess = (e) => {
+                    this.db = e.target.result;
+                    resolve(this.db);
+                };
+                request.onerror = (e) => {
+                    console.error('DB Open Error:', e);
+                    reject('IndexedDB 起動エラー');
+                };
+            } catch (err) {
+                reject(err);
+            }
         });
     }
 
     async set(key, value) {
-        const db = await this.open();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(this.storeName, 'readwrite');
-            const store = tx.objectStore(this.storeName);
-            const request = store.put(value, key);
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject('データの保存に失敗しました');
-        });
+        try {
+            const db = await this.open();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(this.storeName, 'readwrite');
+                const store = tx.objectStore(this.storeName);
+                const request = store.put(value, key);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject('保存失敗');
+            });
+        } catch (e) { console.error(e); }
     }
 
     async get(key) {
-        const db = await this.open();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(this.storeName, 'readonly');
-            const store = tx.objectStore(this.storeName);
-            const request = store.get(key);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject('データの取得に失敗しました');
-        });
+        try {
+            const db = await this.open();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(this.storeName, 'readonly');
+                const store = tx.objectStore(this.storeName);
+                const request = store.get(key);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject('取得失敗');
+            });
+        } catch (e) { return null; }
     }
 
     async migrateFromLocalStorage() {
-        const isMigrated = await this.get('__migration_complete');
-        if (isMigrated) return;
+        try {
+            const isMigrated = await this.get('__migration_complete');
+            if (isMigrated) return;
 
-        console.log('古い保存領域からデータを移行しています...');
-        let count = 0;
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key.startsWith('auth_') || key.startsWith('bookmarkData_') || key.startsWith('DAILY24_')) {
-                try {
-                    const value = JSON.parse(localStorage.getItem(key));
-                    await this.set(key, value);
-                    count++;
-                } catch (e) {
-                    console.error('移行エラー:', key);
+            console.log('古いデータを確認中...');
+            let count = 0;
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('auth_') || key.startsWith('bookmarkData_') || key.startsWith('DAILY24_')) {
+                    try {
+                        const raw = localStorage.getItem(key);
+                        if (raw) {
+                            const value = JSON.parse(raw);
+                            await this.set(key, value);
+                            count++;
+                        }
+                    } catch (e) {
+                        // JSONが壊れているデータはスキップして次へ進む
+                        console.warn('移行スキップ:', key);
+                    }
                 }
             }
+            await this.set('__migration_complete', true);
+            if (count > 0) console.log(`${count}件のデータを移行しました。`);
+        } catch (err) {
+            console.error('移行処理でエラーが発生しましたが、起動を続行します。', err);
         }
-        await this.set('__migration_complete', true);
-        if (count > 0) console.log(`${count}件のデータを移行しました。`);
     }
 }
 
@@ -128,7 +148,7 @@ class BookmarkManager {
         if (!this.userId) return;
         const savedData = await db.get(`bookmarkData_${this.userId}`);
         this.data = savedData || { categories: [] };
-        if (!this.data.categories) this.data.categories = [];
+        if (!this.data || !this.data.categories) this.data = { categories: [] };
     }
 
     async saveData() {
@@ -192,7 +212,7 @@ class BookmarkManager {
     }
 }
 
-// --- UI マネージャー (エラー対策強化版) ---
+// --- UI マネージャー ---
 class UIManager {
     constructor(authManager, bookmarkManager) {
         this.auth = authManager;
@@ -200,219 +220,29 @@ class UIManager {
         this.currentCategoryId = null;
         this.currentBookmarkId = null;
 
-        // 全ての要素を安全に取得
-        this.els = {
-            loginScreen: document.getElementById('loginScreen'),
-            mainScreen: document.getElementById('mainScreen'),
-            loginForm: document.getElementById('loginForm'),
-            registerForm: document.getElementById('registerForm'),
-            categoryList: document.getElementById('categoryList'),
-            categoryModal: document.getElementById('categoryModal'),
-            bookmarkModal: document.getElementById('bookmarkModal'),
-            importModal: document.getElementById('importModal')
-        };
-
         this.initEventListeners();
+        this.ensureInitialView();
     }
 
-    // 要素が存在するか確認してから操作する安全関数
+    // 画面が真っ白になるのを防ぐため、初期状態を強制する
+    ensureInitialView() {
+        const loginScreen = document.getElementById('loginScreen');
+        const mainScreen = document.getElementById('mainScreen');
+        if (loginScreen) loginScreen.style.display = 'block';
+        if (mainScreen) mainScreen.style.display = 'none';
+    }
+
     safeStyle(id, prop, value) {
-        const el = document.getElementById(id) || this.els[id];
-        if (el) {
-            el.style[prop] = value;
-        } else {
-            console.warn(`要素が見つかりません: ${id}`);
-        }
+        const el = document.getElementById(id);
+        if (el) el.style[prop] = value;
     }
 
     initEventListeners() {
         const bindClick = (id, fn) => {
             const el = document.getElementById(id);
             if (el) el.onclick = fn;
-            else console.warn(`ボタンが見つかりません: ${id}`);
         };
 
-        // ログイン・登録画面切り替え
         bindClick('showRegisterBtn', () => {
             this.safeStyle('loginForm', 'display', 'none');
-            this.safeStyle('registerForm', 'display', 'block');
-        });
-        bindClick('showLoginBtn', () => {
-            this.safeStyle('registerForm', 'display', 'none');
-            this.safeStyle('loginForm', 'display', 'block');
-        });
-
-        // 登録・ログイン・ログアウト
-        bindClick('registerBtn', async () => {
-            const user = document.getElementById('registerUsername')?.value;
-            const pass = document.getElementById('registerPassword')?.value;
-            const confirm = document.getElementById('registerConfirmPassword')?.value;
-            if (pass !== confirm) { alert('パスワードが一致しません'); return; }
-            try {
-                await this.auth.register(user, pass);
-                alert('登録完了！ログインしてください。');
-                document.getElementById('showLoginBtn')?.click();
-            } catch (e) { alert(e.message); }
-        });
-
-        bindClick('loginBtn', async () => {
-            const user = document.getElementById('loginUsername')?.value;
-            const pass = document.getElementById('loginPassword')?.value;
-            try {
-                const userData = await this.auth.login(user, pass);
-                await this.manager.setUserId(userData.userId);
-                this.showMainScreen(userData.username);
-            } catch (e) { alert(e.message); }
-        });
-
-        bindClick('logoutBtn', () => { this.auth.logout(); location.reload(); });
-
-        // カテゴリ・ブックマーク操作
-        bindClick('addCategoryBtn', () => this.openCategoryModal());
-        bindClick('saveCategoryBtn', async () => {
-            const name = document.getElementById('categoryNameInput')?.value.trim();
-            if (!name) return;
-            if (this.currentCategoryId) await this.manager.updateCategory(this.currentCategoryId, name);
-            else await this.manager.addCategory(name);
-            this.closeAllModals(); this.renderCategories();
-        });
-
-        bindClick('saveBookmarkBtn', async () => {
-            const name = document.getElementById('bookmarkNameInput')?.value.trim();
-            let url = document.getElementById('bookmarkUrlInput')?.value.trim();
-            const desc = document.getElementById('bookmarkDescInput')?.value.trim();
-            if (!name || !url) { alert('サイト名とURLを入力してください'); return; }
-            if (!url.startsWith('http')) url = 'https://' + url;
-            if (this.currentBookmarkId) await this.manager.updateBookmark(this.currentCategoryId, this.currentBookmarkId, name, url, desc);
-            else await this.manager.addBookmark(this.currentCategoryId, name, url, desc);
-            this.closeAllModals(); this.renderCategories();
-        });
-
-        // インポート・エクスポート
-        bindClick('exportBtn', () => {
-            const data = this.manager.exportData();
-            const blob = new Blob([data], { type: 'application/json' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `bookmarks_${new Date().toISOString().slice(0,10)}.json`;
-            a.click();
-        });
-
-        bindClick('importBtn', () => this.els.importModal?.classList.add('active'));
-        bindClick('confirmImportBtn', async () => {
-            const file = document.getElementById('importFileInput')?.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    const data = JSON.parse(e.target.result);
-                    if (await this.manager.importData(data)) {
-                        alert('インポート完了！');
-                        this.closeAllModals(); this.renderCategories();
-                    }
-                } catch (err) { alert('形式が正しくありません'); }
-            };
-            reader.readAsText(file);
-        });
-
-        document.querySelectorAll('.close, .cancel').forEach(btn => {
-            btn.onclick = () => this.closeAllModals();
-        });
-    }
-
-    showMainScreen(username) {
-        this.safeStyle('loginScreen', 'display', 'none');
-        this.safeStyle('mainScreen', 'display', 'block');
-        const userDisplay = document.getElementById('displayUsername');
-        if (userDisplay) userDisplay.textContent = username;
-        this.renderCategories();
-    }
-
-    renderCategories() {
-        if (!this.els.categoryList) return;
-        this.els.categoryList.innerHTML = '';
-        const categories = this.manager.getCategories();
-        if (categories.length === 0) {
-            this.els.categoryList.innerHTML = '<p class="empty-msg">カテゴリがありません。追加してください。</p>'; return;
-        }
-
-        categories.forEach(cat => {
-            const catEl = document.createElement('div');
-            catEl.className = 'category-card';
-            catEl.innerHTML = `
-                <div class="category-header"><h2 class="category-title">${this.escape(cat.name)}</h2>
-                    <div class="category-actions"><button class="btn btn-secondary btn-sm edit-cat" data-id="${cat.id}">編集</button><button class="btn btn-danger btn-sm delete-cat" data-id="${cat.id}">削除</button></div>
-                </div>
-                <div class="bookmark-list">
-                    ${(cat.bookmarks || []).map(bm => `
-                        <div class="bookmark-item">
-                            <div class="bookmark-info"><a href="${this.escape(bm.url)}" target="_blank" class="bookmark-name">${this.escape(bm.name)}</a><p class="bookmark-desc">${this.escape(bm.description || '')}</p></div>
-                            <div class="bookmark-actions"><button class="btn-icon edit-bm" data-cat="${cat.id}" data-id="${bm.id}">✏️</button><button class="btn-icon delete-bm" data-cat="${cat.id}" data-id="${bm.id}">🗑️</button></div>
-                        </div>`).join('')}
-                </div>
-                <button class="btn btn-primary btn-block add-bm" data-id="${cat.id}">+ ブックマークを追加</button>
-            `;
-            catEl.querySelector('.edit-cat').onclick = () => this.openCategoryModal(cat.id, cat.name);
-            catEl.querySelector('.delete-cat').onclick = async () => {
-                if (confirm('このカテゴリを削除しますか？')) { await this.manager.deleteCategory(cat.id); this.renderCategories(); }
-            };
-            catEl.querySelector('.add-bm').onclick = () => this.openBookmarkModal(cat.id);
-            catEl.querySelectorAll('.edit-bm').forEach(btn => {
-                btn.onclick = () => {
-                    const bm = cat.bookmarks.find(b => b.id === btn.dataset.id);
-                    this.openBookmarkModal(cat.id, bm);
-                };
-            });
-            catEl.querySelectorAll('.delete-bm').forEach(btn => {
-                btn.onclick = async () => {
-                    if (confirm('削除しますか？')) { await this.manager.deleteBookmark(cat.id, btn.dataset.id); this.renderCategories(); }
-                };
-            });
-            this.els.categoryList.appendChild(catEl);
-        });
-    }
-
-    escape(str) { const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
-
-    openCategoryModal(id = null, name = '') {
-        this.currentCategoryId = id;
-        const title = document.getElementById('categoryModalTitle');
-        if (title) title.textContent = id ? 'カテゴリを編集' : 'カテゴリを追加';
-        const input = document.getElementById('categoryNameInput');
-        if (input) input.value = name;
-        this.els.categoryModal?.classList.add('active');
-    }
-
-    openBookmarkModal(categoryId, bookmark = null) {
-        this.currentCategoryId = categoryId;
-        this.currentBookmarkId = bookmark ? bookmark.id : null;
-        const title = document.getElementById('bookmarkModalTitle');
-        if (title) title.textContent = bookmark ? 'ブックマークを編集' : 'ブックマークを追加';
-        const nameInput = document.getElementById('bookmarkNameInput');
-        const urlInput = document.getElementById('bookmarkUrlInput');
-        const descInput = document.getElementById('bookmarkDescInput');
-        if (nameInput) nameInput.value = bookmark ? bookmark.name : '';
-        if (urlInput) urlInput.value = bookmark ? bookmark.url : '';
-        if (descInput) descInput.value = bookmark ? (bookmark.description || '') : '';
-        this.els.bookmarkModal?.classList.add('active');
-    }
-
-    closeAllModals() {
-        ['categoryModal', 'bookmarkModal', 'importModal'].forEach(m => this.els[m]?.classList.remove('active'));
-        this.currentCategoryId = null; this.currentBookmarkId = null;
-    }
-}
-
-// アプリ初期化
-document.addEventListener('DOMContentLoaded', async () => {
-    try {
-        await db.open();
-        await db.migrateFromLocalStorage();
-        const auth = new SimpleAuthManager();
-        const manager = new BookmarkManager();
-        new UIManager(auth, manager);
-    } catch (e) {
-        console.error(e);
-        alert('アプリの起動中にエラーが発生しました。ページを再読み込みしてください。');
-    }
-});
+            this.safeStyle('registerForm', '
